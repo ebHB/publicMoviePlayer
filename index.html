@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>カスタム動画プレイヤー</title>
+<style>
+  body {
+    font-family: sans-serif;
+    text-align: center;
+    background: #f5f5f5;
+  }
+
+  video {
+    width: 90%;
+    max-width: 800px;
+    border-radius: 12px;
+    margin-top: 20px;
+    background: black;
+    pointer-events: none; /* ユーザーの直接操作を禁止 */
+  }
+
+  .controls {
+    margin-top: 15px;
+  }
+
+  button {
+    font-size: 20px;
+    margin: 5px;
+    padding: 10px 20px;
+    border-radius: 8px;
+  }
+
+  /* シークバーのスタイル */
+  #seekBar {
+    width: 90%;
+    max-width: 800px;
+    height: 10px;
+    margin-top: 10px;
+    -webkit-appearance: none;
+    background: #ccc;
+    border-radius: 5px;
+  }
+
+  #seekBar::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #007bff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  #seekBar::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #007bff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<h2>動画とウィークポイントリストを選択</h2>
+<input type="file" id="folderInput" webkitdirectory>
+<video id="video"></video>
+
+<span id="now">0:00</span>
+<!-- 自作シークバー -->
+<input type="range" id="seekBar" value="0" min="0" max="100" step="0.01">
+
+<!-- ボタン群 -->
+<div class="controls">
+  <button id="playPause">▶️再生 / ⏸停止</button>
+  <button id="prevWP">⏪ 前のポイント</button>
+  <button id="nextWP">⏩ 次のポイント</button>
+  <button id="back5">-5秒</button>
+  <button id="forward5">+5秒</button>
+</div>
+
+<script>
+const folderInput = document.getElementById('folderInput');
+const video = document.getElementById('video');
+const seekBar = document.getElementById('seekBar');
+const playPauseBtn = document.getElementById('playPause');
+const prevWPBtn = document.getElementById('prevWP');
+const nextWPBtn = document.getElementById('nextWP');
+const back5Btn = document.getElementById('back5');
+const forward5Btn = document.getElementById('forward5');
+const nowEl = document.getElementById("now");
+
+let weekPoints = [];
+
+// フォルダ選択時
+folderInput.addEventListener('change', async (event) => {
+  const files = event.target.files;
+  let videoFile, jsonFile;
+
+  for (const f of files) {
+    if (f.name.endsWith('.mp4')) videoFile = f;
+    if (f.name.endsWith('.json')) jsonFile = f;
+  }
+
+  if (!videoFile || !jsonFile) {
+    alert('mp4 と json の両方を含むフォルダを選択してください。');
+    return;
+  }
+
+  video.src = URL.createObjectURL(videoFile);
+  video.load();
+
+  const text = await jsonFile.text();
+  weekPoints = JSON.parse(text);
+  weekPoints.sort((a,b) => a - b);
+  console.log('ウィークポイント:', weekPoints);
+});
+
+// 再生・停止
+playPauseBtn.addEventListener('click', () => {
+  if (video.paused) {
+    video.play();
+  } else {
+    video.pause();
+  }
+});
+video.addEventListener('timeupdate', () => {
+  const now = Number(video.currentTime);
+  const min = Math.floor(now / 60);
+  let sec = Math.floor(now % 60);
+  if (sec < 10){sec = "0" + sec;}
+  nowEl.textContent = min.toString() + ":" + sec.toString();
+});
+
+// 5秒進め・戻す
+back5Btn.addEventListener('click', () => video.currentTime = Math.max(0, video.currentTime - 5));
+forward5Btn.addEventListener('click', () => video.currentTime = Math.min(video.duration, video.currentTime + 5));
+
+// ウィークポイント移動
+nextWPBtn.addEventListener('click', () => {
+  const cur = video.currentTime;
+  const next = weekPoints.find(p => p > cur + 0.1);
+  if (next !== undefined) video.currentTime = next;
+});
+prevWPBtn.addEventListener('click', () => {
+  const cur = video.currentTime;
+  const prev = [...weekPoints].reverse().find(p => p < cur - 0.5);
+  if (prev !== undefined) video.currentTime = prev;
+});
+
+// 動画再生中の進行に合わせてシークバーを更新
+video.addEventListener('timeupdate', () => {
+  if (video.duration > 0) {
+    seekBar.value = (video.currentTime / video.duration) * 100;
+  }
+});
+
+// シークバー操作で動画の再生位置を変更
+seekBar.addEventListener('input', () => {
+  if (video.duration > 0) {
+    const newTime = (seekBar.value / 100) * video.duration;
+    video.currentTime = newTime;
+  }
+});
+</script>
+
+</body>
+</html>
