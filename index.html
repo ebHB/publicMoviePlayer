@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>カスタム動画プレイヤー</title>
+<title>Own SceneJump Engine</title>
 <style>
   body {
     font-family: sans-serif;
@@ -57,28 +57,51 @@
     border-radius: 50%;
     cursor: pointer;
   }
+  ul {
+    list-style-type: none;  /* ●を消す（自由に見た目変更） */
+    padding: 0;
+    width: 200px;
+    margin: 0 auto; 
+  }
+  li {
+    text-align: right;       /* 🟢 右揃え */
+    padding: 8px 12px;       /* 少し余白 */
+    border-bottom: 1px solid #ccc; /* 下線で区切り */
+    cursor: pointer;         /* 手のアイコン */
+  }
+  li:hover {
+    background-color: #eee;  /* 🟡 ホバーで色変化 */
+  }
 </style>
 </head>
 <body>
 
-<h2>動画とウィークポイントリストを選択</h2>
+<h1>Own SceneJump Engine</h1>
+<div id="folderSelectNotice"><h4>動画[.mp4]とブックマークリスト[.json]入りフォルダを選択</h4></div>
 <p><input type="file" id="folderInput" webkitdirectory></p>
+<div id="mainContent" style="display:none">
 <p><video id="video"></video></p>
 
 <p><span id="now">0:00</span></p>
 <!-- 自作シークバー -->
-<input type="range" id="seekBar" value="0" min="0" max="100" step="0.01">
+<p><input type="range" id="seekBar" value="0" min="0" max="100" step="0.01"></p>
 
 <!-- ボタン群 -->
-<div class="controls">
+<p><div class="controls">
   <button id="playPause">▶️再生 / ⏸停止</button>
   <button id="prevWP">⏪ 前のポイント</button>
   <button id="nextWP">⏩ 次のポイント</button>
   <button id="back5">-5秒</button>
   <button id="forward5">+5秒</button>
 </div>
+</p>
+<p><ul id="bookmarkList">
+</ul></p>
+</div>
 
 <script>
+const mainContent = document.getElementById("mainContent");
+const folderSelectNotice = document.getElementById("folderSelectNotice")
 const folderInput = document.getElementById('folderInput');
 const video = document.getElementById('video');
 const seekBar = document.getElementById('seekBar');
@@ -88,8 +111,9 @@ const nextWPBtn = document.getElementById('nextWP');
 const back5Btn = document.getElementById('back5');
 const forward5Btn = document.getElementById('forward5');
 const nowEl = document.getElementById("now");
+const bookmarkList = document.getElementById("bookmarkList")
 
-let weekPoints = [];
+let bookmarks = [];
 
 // フォルダ選択時
 folderInput.addEventListener('change', async (event) => {
@@ -103,16 +127,28 @@ folderInput.addEventListener('change', async (event) => {
 
   if (!videoFile || !jsonFile) {
     alert('mp4 と json の両方を含むフォルダを選択してください。');
+    mainContent.style.display = "none";
+    folderSelectNotice.style.display = "block";
     return;
   }
+  mainContent.style.display = "block";
+  folderSelectNotice.style.display = "none";
 
   video.src = URL.createObjectURL(videoFile);
   video.load();
 
   const text = await jsonFile.text();
-  weekPoints = JSON.parse(text);
-  weekPoints.sort((a,b) => a - b);
-  console.log('ウィークポイント:', weekPoints);
+  bookmarks = JSON.parse(text);
+  bookmarks.sort((a,b) => a - b);
+  console.log('ブックマーク:', bookmarks);
+  bookmarks.forEach(element => {
+    const li = document.createElement("li");
+    li.textContent = element;
+    li.addEventListener("click", () => {
+      ClickOnBookmarkList(element);
+    })
+    bookmarkList.appendChild(li);
+  });
 });
 
 // 再生・停止
@@ -135,17 +171,25 @@ video.addEventListener('timeupdate', () => {
 back5Btn.addEventListener('click', () => video.currentTime = Math.max(0, video.currentTime - 5));
 forward5Btn.addEventListener('click', () => video.currentTime = Math.min(video.duration, video.currentTime + 5));
 
-// ウィークポイント移動
+// ブックマーク移動
 nextWPBtn.addEventListener('click', () => {
   const cur = video.currentTime;
-  const next = weekPoints.find(p => p > cur + 0.1);
+  const next = bookmarks.find(p => p > cur + 0.1);
   if (next !== undefined) video.currentTime = next;
 });
 prevWPBtn.addEventListener('click', () => {
   const cur = video.currentTime;
-  const prev = [...weekPoints].reverse().find(p => p < cur - 0.5);
+  const prev = [...bookmarks].reverse().find(p => p < cur - 0.5);
   if (prev !== undefined) video.currentTime = prev;
 });
+// リストからブックマーク移動
+function ClickOnBookmarkList(sec){
+  video.currentTime = sec;
+  window.scrollTo({
+    top: 0,
+    // behavior: "smooth"  // なめらかに戻る
+  });
+}
 
 // 動画再生中の進行に合わせてシークバーを更新
 video.addEventListener('timeupdate', () => {
