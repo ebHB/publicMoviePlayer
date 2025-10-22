@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Own SceneJump Engine</title>
+<style>
+  body {
+    font-family: sans-serif;
+    text-align: center;
+    background: #f5f5f5;
+  }
+
+  video {
+    width: 90%;
+    max-width: 800px;
+    border-radius: 12px;
+    margin-top: 20px;
+    background: black;
+    pointer-events: none; /* ユーザーの直接操作を禁止 */
+  }
+
+  .controls {
+    margin-top: 15px;
+  }
+
+  button {
+    font-size: 20px;
+    margin: 5px;
+    padding: 10px 20px;
+    border-radius: 8px;
+  }
+
+  /* シークバーのスタイル */
+  #seekBar {
+    width: 90%;
+    max-width: 800px;
+    height: 10px;
+    margin-top: 10px;
+    -webkit-appearance: none;
+    background: #ccc;
+    border-radius: 5px;
+  }
+
+  #seekBar::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #007bff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  #seekBar::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #007bff;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  ul {
+    list-style-type: none;  /* ●を消す（自由に見た目変更） */
+    padding: 0;
+    width: 200px;
+    margin: 0 auto; 
+  }
+  li {
+    text-align: right;       /* 🟢 右揃え */
+    padding: 8px 12px;       /* 少し余白 */
+    border-bottom: 1px solid #ccc; /* 下線で区切り */
+    cursor: pointer;         /* 手のアイコン */
+  }
+  li:hover {
+    background-color: #eee;  /* 🟡 ホバーで色変化 */
+  }
+</style>
+</head>
+<body>
+
+<h1>Own SceneJump Engine</h1>
+<div id="folderSelectNotice"><h4>動画[.mp4]とブックマークリスト[.json]入りフォルダを選択</h4></div>
+<p><input type="file" id="folderInput" webkitdirectory></p>
+<div id="mainContent" style="display:none">
+<p><video id="video"></video></p>
+
+<p><span id="now">0:00</span></p>
+<!-- 自作シークバー -->
+<p><input type="range" id="seekBar" value="0" min="0" max="100" step="0.01"></p>
+
+<!-- ボタン群 -->
+<p><div class="controls">
+  <button id="playPause">▶️再生 / ⏸停止</button>
+  <button id="prevWP">⏪ 前のポイント</button>
+  <button id="nextWP">⏩ 次のポイント</button>
+  <button id="back5">-5秒</button>
+  <button id="forward5">+5秒</button>
+</div>
+</p>
+<p><ul id="bookmarkList">
+</ul></p>
+</div>
+
+<script>
+const mainContent = document.getElementById("mainContent");
+const folderSelectNotice = document.getElementById("folderSelectNotice")
+const folderInput = document.getElementById('folderInput');
+const video = document.getElementById('video');
+const seekBar = document.getElementById('seekBar');
+const playPauseBtn = document.getElementById('playPause');
+const prevWPBtn = document.getElementById('prevWP');
+const nextWPBtn = document.getElementById('nextWP');
+const back5Btn = document.getElementById('back5');
+const forward5Btn = document.getElementById('forward5');
+const nowEl = document.getElementById("now");
+const bookmarkList = document.getElementById("bookmarkList")
+
+let bookmarks = [];
+
+// フォルダ選択時
+folderInput.addEventListener('change', async (event) => {
+  const files = event.target.files;
+  let videoFile, jsonFile;
+
+  for (const f of files) {
+    if (f.name.endsWith('.mp4')) videoFile = f;
+    if (f.name.endsWith('.json')) jsonFile = f;
+  }
+
+  if (!videoFile || !jsonFile) {
+    alert('mp4 と json の両方を含むフォルダを選択してください。');
+    mainContent.style.display = "none";
+    folderSelectNotice.style.display = "block";
+    return;
+  }
+  mainContent.style.display = "block";
+  folderSelectNotice.style.display = "none";
+
+  video.src = URL.createObjectURL(videoFile);
+  video.load();
+
+  const text = await jsonFile.text();
+  bookmarks = JSON.parse(text);
+  bookmarks.sort((a,b) => a - b);
+  console.log('ブックマーク:', bookmarks);
+  bookmarks.forEach(element => {
+    const li = document.createElement("li");
+    li.textContent = element;
+    li.addEventListener("click", () => {
+      ClickOnBookmarkList(element);
+    })
+    bookmarkList.appendChild(li);
+  });
+});
+
+// 再生・停止
+playPauseBtn.addEventListener('click', () => {
+  if (video.paused) {
+    video.play();
+  } else {
+    video.pause();
+  }
+});
+video.addEventListener('timeupdate', () => {
+  const now = Number(video.currentTime);
+  const min = Math.floor(now / 60);
+  let sec = Math.floor(now % 60);
+  if (sec < 10){sec = "0" + sec;}
+  nowEl.textContent = min.toString() + ":" + sec.toString();
+});
+
+// 5秒進め・戻す
+back5Btn.addEventListener('click', () => video.currentTime = Math.max(0, video.currentTime - 5));
+forward5Btn.addEventListener('click', () => video.currentTime = Math.min(video.duration, video.currentTime + 5));
+
+// ブックマーク移動
+nextWPBtn.addEventListener('click', () => {
+  const cur = video.currentTime;
+  const next = bookmarks.find(p => p > cur + 0.1);
+  if (next !== undefined) video.currentTime = next;
+  if (next !== undefined) video.currentTime = next;
+});
+prevWPBtn.addEventListener('click', () => {
+  const cur = video.currentTime;
+  const prev = [...bookmarks].reverse().find(p => p < cur - 0.5);
+  if (prev !== undefined) video.currentTime = prev;
+});
+// リストからブックマーク移動
+function ClickOnBookmarkList(sec){
+  video.currentTime = sec;
+  window.scrollTo({
+    top: 0,
+    // behavior: "smooth"  // なめらかに戻る
+  });
+}
+
+// 動画再生中の進行に合わせてシークバーを更新
+video.addEventListener('timeupdate', () => {
+  if (video.duration > 0) {
+    seekBar.value = (video.currentTime / video.duration) * 100;
+  }
+});
+
+// シークバー操作で動画の再生位置を変更
+seekBar.addEventListener('input', () => {
+  if (video.duration > 0) {
+    const newTime = (seekBar.value / 100) * video.duration;
+    video.currentTime = newTime;
+  }
+});
+</script>
+
+</body>
+</html>

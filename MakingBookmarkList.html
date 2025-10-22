@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>色変化検出（平均色しきい値10 / 再生中のみ）</title>
+<style>
+  :root { --maxw: 900px; }
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f5f5f5;
+    margin: 0; padding: 16px; text-align: center;
+  }
+  h2 { margin: 8px 0 12px; }
+  .row { margin: 10px auto; max-width: var(--maxw); }
+  .controls button {
+    font-size: 16px; padding: 10px 16px; margin: 4px; border-radius: 10px;
+  }
+
+  /* 動画を相対配置のコンテナに入れる（その上に枠を載せる） */
+  .video-wrap {
+    position: relative;
+    display: inline-block;
+    width: 95%;
+    max-width: var(--maxw);
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    touch-action: none;
+  }
+  video {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #000;
+  }
+
+  /* 監視枠（赤） */
+  .monitor {
+    position: absolute;
+    border: 3px solid red;
+    box-sizing: border-box;
+    touch-action: none;            /* iPadでのブラウザジェスチャ無効化 */
+    background: rgba(255,0,0,0.08);
+  }
+  /* リサイズ用ハンドル（4隅） */
+  .handle {
+    position: absolute;
+    width: 18px; height: 18px;
+    background: #fff; border: 2px solid red; border-radius: 50%;
+    touch-action: none;
+  }
+  .handle.nw { left: -10px; top: -10px; cursor: nwse-resize; }
+  .handle.ne { right: -10px; top: -10px; cursor: nesw-resize; }
+  .handle.sw { left: -10px; bottom: -10px; cursor: nesw-resize; }
+  .handle.se { right: -10px; bottom: -10px; cursor: nwse-resize; }
+
+  .time { font-variant-numeric: tabular-nums; color: #333; }
+  .monitor.min { width: 20px !important; height: 20px !important; }
+</style>
+</head>
+<body>
+<h2>色変化検出（平均色しきい値=10 / 再生中のみ / JSON保存）</h2>
+
+<div class="row">
+  <input type="file" id="videoInput" accept="video/*">
+</div>
+
+<div class="row video-wrap" id="wrap">
+  <video id="video" playsinline></video>
+  <!-- 監視枠（初期200px四方・中央配置） -->
+  <div id="monitor" class="monitor" style="width:200px;height:200px;left:50%;top:50%;transform:translate(-50%,-50%);">
+    <div class="handle nw" data-h="nw"></div>
+    <div class="handle ne" data-h="ne"></div>
+    <div class="handle sw" data-h="sw"></div>
+    <div class="handle se" data-h="se"></div>
+  </div>
+</div>
+
+<div class="row controls">
+  <button id="playBtn">▶ 再生 / ⏸ 一時停止</button>
+  <button id="clearBtn">🧹 記録クリア</button>
+  <button id="saveBtn">💾 JSONを保存</button>
+</div>
+
+<div class="row">
+  <span class="time">現在: <span id="now">0.00</span> s</span> ／
+  <span class="time">検出数: <span id="count">0</span></span>
+</div>
+<span id="debug">a</span>
+<span id="debug2">a</span>
+
+<!-- 解析用キャンバス（非表示） -->
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+(() => {
+  const THRESHOLD = 200;          // 平均色の差しきい値
+  const DiffWide = 60;
+  const SAMPLE_INTERVAL_MS = 100; // 解析間隔（ms）
+  const DEDUP_SEC = 0.2;         // 近接重複記録を抑制（秒）
+
+  const video = document.getElementById('video');
+  const input = document.getElementById('videoInput');
+  const wrap  = document.getElementById('wrap');
+  const monitor = document.getElementById('monitor');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const playBtn  = document.getElementById('playBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const saveBtn  = document.getElementById('saveBtn');
+  const nowEl    = document.getElementById('now');
+  const countEl  = document.getElementById('count');
+  const debugEl = document.getElementById("debug");
+  const debug2El = document.getElementById("debug2");
+
+  let objURL = null;
+  let analyzing = false;
+  let analyzerTimer = null;
+  let prevData = null;              // 前回平均
+  let colorChanges = [];           // 記録（時刻の配列）
+  let videoFileNameBase = 'video';
+
+  // ==== 動画ロード ====
+  input.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (objURL) URL.revokeObjectURL(objURL);
+    objURL = URL.createObjectURL(file);
+    video.src = objURL;
+    const n = file.name || 'video.mp4';
+    videoFileNameBase = n.replace(/\.[^.]+$/, '');
+  });
+
+  // ==== 再生/停止ボタン ====
+  playBtn.addEventListener('click', () => {
+    if (!video.src) { alert('先に動画ファイルを選択してください'); return; }
+    if (video.paused) video.play();
+    else video.pause();
+  });
+
+  // ==== 記録クリア ====
+  clearBtn.addEventListener('click', () => {
+    colorChanges = [];
+    prevData = null;
+    countEl.textContent = '0';
+  });
+
+  // ==== JSON保存 ====
+  saveBtn.addEventListener('click', () => {
+    const json = JSON.stringify(colorChanges, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${videoFileNameBase}_changes.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // ==== 再生/停止/終了で解析制御 ====
+  video.addEventListener('play',  () => startAnalyze());
+  video.addEventListener('pause', () => stopAnalyze());
+  video.addEventListener('ended', () => stopAnalyze());
+  video.addEventListener('timeupdate', () => {
+    nowEl.textContent = video.currentTime.toFixed(2);
+  });
+
+  function startAnalyze() {
+    if (analyzing) return;
+    analyzing = true;
+    prevData = null; // 再生開始時はリセット
+    loopAnalyze();
+  }
+
+  function stopAnalyze() {
+    analyzing = false;
+    if (analyzerTimer) {
+      clearTimeout(analyzerTimer);
+      analyzerTimer = null;
+    }
+  }
+
+  // ==== 解析ループ（再生中のみ / 約10Hz）====
+  function loopAnalyze() {
+    if (!analyzing) return;
+
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      analyzerTimer = setTimeout(loopAnalyze, SAMPLE_INTERVAL_MS);
+      return;
+    }
+
+    // 実ピクセルのキャンバスへ動画を描画
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    canvas.width = vw;
+    canvas.height = vh;
+    ctx.drawImage(video, 0, 0, vw, vh);
+
+    // 表示上の監視枠 → 動画実ピクセル座標に変換
+    const monRect = monitor.getBoundingClientRect();
+    const videoRect = video.getBoundingClientRect();
+    const scaleX = vw / videoRect.width;
+    const scaleY = vh / videoRect.height;
+
+    // monitorの座標をvideo領域基準に
+    let relLeft = monRect.left - videoRect.left;
+    let relTop  = monRect.top  - videoRect.top;
+
+    let sx = Math.max(0, Math.min(vw, relLeft * scaleX));
+    let sy = Math.max(0, Math.min(vh, relTop  * scaleY));
+    let sw = Math.max(1, Math.min(vw - sx, monRect.width  * scaleX));
+    let sh = Math.max(1, Math.min(vh - sy, monRect.height * scaleY));
+
+    // 小さすぎる時はスキップ
+    if (sw < 2 || sh < 2) {
+      analyzerTimer = setTimeout(loopAnalyze, SAMPLE_INTERVAL_MS);
+      return;
+    }
+
+    const img = ctx.getImageData(Math.floor(sx), Math.floor(sy), Math.floor(sw), Math.floor(sh));
+    const data = img.data; // RGBAの並び
+    // 平均明るさ(= (R+G+B)/3 の平均) を求める
+    let diff = 0;
+    const len = data.length;
+    // しきい値判定（平均色差 ＞ THRESHOLD）
+    if (prevData == null){
+      prevData = structuredClone(data);
+    }
+    // 4要素(R,G,B,A)ずつなので、i+=4でRのみ参照
+    for (let i = 0; i < len; i += 4) {
+      // R,G,Bの平均
+      if (!((data[i] + data[i+1] + data[i+2] - DiffWide)
+      < (prevData[i] + prevData[i+1] + prevData[i+2] ) &&
+      (prevData[i] + prevData[i+1] + prevData[i+2] )
+      < (data[i] + data[i+1] + data[i+2] + DiffWide))){
+        diff += 1;
+      }
+    }
+    debugEl.textContent = diff;
+    debug2El.textContent = prevData;
+    if (diff > THRESHOLD) {
+      const t = Number(video.currentTime.toFixed(2));
+      const lastT = colorChanges.length ? colorChanges[colorChanges.length - 1] : -999;
+      if (Math.abs(t - lastT) >= DEDUP_SEC) {
+        colorChanges.push(t);
+        countEl.textContent = String(colorChanges.length);
+        // console.log('detect:', t, 'diff=', diff.toFixed(2));
+      }
+    }
+    prevData = structuredClone(data);
+
+    analyzerTimer = setTimeout(loopAnalyze, SAMPLE_INTERVAL_MS);
+  }
+
+  // ==== 枠のドラッグ＆リサイズ（Pointer EventsでiPad対応）====
+  let dragMode = null; // 'move' or 'nw'/'ne'/'sw'/'se'
+  let start = { x:0, y:0, left:0, top:0, width:0, height:0 };
+
+  const handles = monitor.querySelectorAll('.handle');
+  handles.forEach(h => {
+    h.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragMode = e.target.dataset.h;
+      monitor.setPointerCapture(e.pointerId);
+      const r = monitor.getBoundingClientRect();
+      start = { x:e.clientX, y:e.clientY, left:r.left, top:r.top, width:r.width, height:r.height };
+    });
+  });
+
+  // 本体ドラッグ
+  monitor.addEventListener('pointerdown', e => {
+    if ((e.target).classList.contains('handle')) return; // ハンドルは別処理
+    e.preventDefault();
+    dragMode = 'move';
+    monitor.setPointerCapture(e.pointerId);
+    const r = monitor.getBoundingClientRect();
+    start = { x:e.clientX, y:e.clientY, left:r.left, top:r.top, width:r.width, height:r.height };
+  });
+
+  monitor.addEventListener('pointermove', e => {
+    if (!dragMode) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+
+    const wrapRect = wrap.getBoundingClientRect();
+
+    if (dragMode === 'move') {
+      let nl = start.left + dx - wrapRect.left;
+      let nt = start.top  + dy - wrapRect.top;
+      nl = Math.max(0, Math.min(wrapRect.width - start.width, nl));
+      nt = Math.max(0, Math.min(wrapRect.height - start.height, nt));
+      monitor.style.left = nl + 'px';
+      monitor.style.top  = nt + 'px';
+      monitor.style.transform = '';
+    } else {
+      // リサイズ
+      let nl = start.left - wrapRect.left;
+      let nt = start.top  - wrapRect.top;
+      let nw = start.width;
+      let nh = start.height;
+
+      if (dragMode.includes('e')) { nw = Math.max(20, start.width  + dx); }
+      if (dragMode.includes('s')) { nh = Math.max(20, start.height + dy); }
+      if (dragMode.includes('w')) { nl = Math.max(0, start.left - wrapRect.left + dx); nw = Math.max(20, start.width  - dx); }
+      if (dragMode.includes('n')) { nt = Math.max(0, start.top  - wrapRect.top  + dy); nh = Math.max(20, start.height - dy); }
+
+      nl = Math.max(0, Math.min(nl, wrapRect.width  - nw));
+      nt = Math.max(0, Math.min(nt, wrapRect.height - nh));
+      nw = Math.min(nw, wrapRect.width  - nl);
+      nh = Math.min(nh, wrapRect.height - nt);
+
+      monitor.style.left   = nl + 'px';
+      monitor.style.top    = nt + 'px';
+      monitor.style.width  = nw + 'px';
+      monitor.style.height = nh + 'px';
+      monitor.style.transform = '';
+    }
+  });
+
+  monitor.addEventListener('pointerup', e => {
+    if (dragMode) monitor.releasePointerCapture(e.pointerId);
+    dragMode = null;
+  });
+
+  // 画面回転・リサイズ時、枠を内側に収める
+  window.addEventListener('resize', () => {
+    const wrapRect = wrap.getBoundingClientRect();
+    const r = monitor.getBoundingClientRect();
+    let nl = Math.max(0, Math.min(r.left - wrapRect.left, wrapRect.width  - r.width));
+    let nt = Math.max(0, Math.min(r.top  - wrapRect.top,  wrapRect.height - r.height));
+    monitor.style.left = nl + 'px';
+    monitor.style.top  = nt + 'px';
+    monitor.style.transform = '';
+  });
+})();
+</script>
+</body>
+</html>
