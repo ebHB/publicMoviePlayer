@@ -30,6 +30,12 @@
     border-radius: 8px;
   }
 
+  .bm-field {
+    display: inline-flex;
+    flex-direction: column;
+    vertical-align: top;
+  }
+
   /* シークバーのスタイル */
   #seekBar {
     width: 90%;
@@ -40,6 +46,13 @@
     background: #ccc;
     border-radius: 5px;
   }
+
+  .speed-wrapper {
+  width: 90%;
+  max-width: 800px;
+  margin: 0 auto;
+  text-align: right;   /* 🔵 右寄せ */
+}
 
   #seekBar::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -82,21 +95,55 @@
 <div id="mainContent" style="display:none">
 <p><video id="video"></video></p>
 
-<p><span id="now">0:00</span></p>
+<p><div class="speed-wrapper">
+  <select id="speedControl">
+    <option value="0.2">0.2x</option>
+    <option value="0.3">0.3x</option>
+    <option value="0.4">0.4x</option>
+    <option value="0.5">0.5x</option>
+    <option value="0.6">0.6x</option>
+    <option value="0.7">0.7x</option>
+    <option value="0.8">0.8x</option>
+    <option value="0.9">0.9x</option>
+    <option value="1.0" selected>1.0x</option>
+    <option value="1.25">1.25x</option>
+    <option value="1.5">1.5x</option>
+    <option value="1.75">1.75x</option>
+    <option value="2.0">2.0x</option>
+  </select>
+  <span id="now">0:00</span>
+</div></p>
 <!-- 自作シークバー -->
 <p><input type="range" id="seekBar" value="0" min="0" max="100" step="0.01"></p>
 
 <!-- ボタン群 -->
 <p><div class="controls">
-  <button id="playPause">▶️再生 / ⏸停止</button>
-  <button id="prevWP">⏪ 前のポイント</button>
-  <button id="nextWP">⏩ 次のポイント</button>
-  <button id="back5">-5秒</button>
-  <button id="forward5">+5秒</button>
+  <button id="playPause">▶</button>
+  <button id="prevWP"> ◀◀</button>
+  <button id="nextWP">▶▶</button>
+  <button id="back5" style="display:none">-5秒</button>
+  <button id="forward5" style="display:none">+5秒</button>
+  <div class="bm-field">
+    <label for="bookmarkOffset">ブックマーク補正</label>
+    <div>
+      <select id="bookmarkOffsetDropdown" style="width:60px">
+        <option value="-5">-5秒</option>
+        <option value="-4">-4秒</option>
+        <option value="-3">-3秒</option>
+        <option value="-2">-2秒</option>
+        <option value="-1">-1秒</option>
+        <option value="0" selected>0秒</option>
+        <option value="1">1秒</option>
+        <option value="2">2秒</option>
+      </select>
+      <input type="number" id="bookmarkOffset" value="0" style="width:60px">
+    </div>
+  </div>
 </div>
 </p>
-<p><ul id="bookmarkList">
-</ul></p>
+<p>
+  <ul id="bookmarkList"></ul>
+</p>
 </div>
 
 <script>
@@ -112,6 +159,9 @@ const back5Btn = document.getElementById('back5');
 const forward5Btn = document.getElementById('forward5');
 const nowEl = document.getElementById("now");
 const bookmarkList = document.getElementById("bookmarkList")
+const speedControl = document.getElementById("speedControl");
+const bookmarkOffset = document.getElementById("bookmarkOffset");
+const bookmarkOffsetDropdown = document.getElementById("bookmarkOffsetDropdown");
 
 let bookmarks = [];
 
@@ -155,16 +205,23 @@ folderInput.addEventListener('change', async (event) => {
 playPauseBtn.addEventListener('click', () => {
   if (video.paused) {
     video.play();
+    playPauseBtn.textContent = '⏸';
   } else {
     video.pause();
+    playPauseBtn.textContent = '▶';
   }
 });
+// 再生時間
 video.addEventListener('timeupdate', () => {
   const now = Number(video.currentTime);
   const min = Math.floor(now / 60);
   let sec = Math.floor(now % 60);
   if (sec < 10){sec = "0" + sec;}
   nowEl.textContent = min.toString() + ":" + sec.toString();
+});
+// 再生速度
+speedControl.addEventListener('change', () => {
+  video.playbackRate = Number(speedControl.value);
 });
 
 // 5秒進め・戻す
@@ -174,15 +231,36 @@ forward5Btn.addEventListener('click', () => video.currentTime = Math.min(video.d
 // ブックマーク移動
 nextWPBtn.addEventListener('click', () => {
   const cur = video.currentTime;
-  const next = bookmarks.find(p => p > cur + 0.1);
-  if (next !== undefined) video.currentTime = next;
-  if (next !== undefined) video.currentTime = next;
+  const next = bookmarks.find(p => p > cur - Number(bookmarkOffset.value));
+  if (next !== undefined) video.currentTime = next + Number(bookmarkOffset.value);
 });
 prevWPBtn.addEventListener('click', () => {
   const cur = video.currentTime;
-  const prev = [...bookmarks].reverse().find(p => p < cur - 0.5);
-  if (prev !== undefined) video.currentTime = prev;
+  const prev = [...bookmarks].reverse().find(p => p < cur - 0.5 - Number(bookmarkOffset.value));
+  if (prev !== undefined) video.currentTime = prev + Number(bookmarkOffset.value);
 });
+
+// ブックマークオフセットドロップダウン変更時テキストボックスに反映
+bookmarkOffsetDropdown.addEventListener('change', () => {
+  if (bookmarkOffsetDropdown.value !== "other") {
+    bookmarkOffset.value = bookmarkOffsetDropdown.value;
+    // 空白オプションを削除
+    const otherOption = Array.from(bookmarkOffsetDropdown.options).find(option => option.value === "other");
+    if (otherOption) {
+      bookmarkOffsetDropdown.remove(otherOption.index);
+    }
+  }
+});
+
+// ブックマークオフセット入力変更時ドロップダウンを空白に
+bookmarkOffset.addEventListener('input', () => {
+  if (!Array.from(bookmarkOffsetDropdown.options).some(option => option.value === "other")) {
+    bookmarkOffsetDropdown.add(new Option("", "other"));
+  }
+  bookmarkOffsetDropdown.value = "other";
+});
+
+
 // リストからブックマーク移動
 function ClickOnBookmarkList(sec){
   video.currentTime = sec;
@@ -203,7 +281,7 @@ video.addEventListener('timeupdate', () => {
 seekBar.addEventListener('input', () => {
   if (video.duration > 0) {
     const newTime = (seekBar.value / 100) * video.duration;
-    video.currentTime = newTime;
+    video.currentTime = newTime + Number(bookmarkOffset.value);
   }
 });
 </script>

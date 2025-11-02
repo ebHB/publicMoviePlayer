@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>色変化検出（平均色しきい値10 / 再生中のみ）</title>
+<title>Bookmark Settings</title>
 <style>
   :root { --maxw: 900px; }
   body {
@@ -61,12 +61,22 @@
 </head>
 <body>
 <p style="text-align: left;"><a href="index.html">home</a></p>
-<h2>色変化検出（平均色しきい値=10 / 再生中のみ / JSON保存）</h2>
+<h2>Bookmark Settings</h2>
 
 <div class="row">
   <input type="file" id="videoInput" accept="video/*">
 </div>
 
+<form id="modeSerect">
+  <label>
+    <input type="radio" name="mode" value="New"> New
+  </label>
+  <label>
+    <input type="radio" name="mode" value="Edit"> Edit
+  </label>
+</form>
+
+<div id="mainContent_new" style="display:none">
 <div class="row video-wrap" id="wrap">
   <video id="video" playsinline></video>
   <!-- 監視枠（初期200px四方・中央配置） -->
@@ -90,9 +100,14 @@
 </div>
 <span id="debug">a</span>
 <span id="debug2">a</span>
-
 <!-- 解析用キャンバス（非表示） -->
-<canvas id="canvas" style="display:none"></canvas>
+<canvas id="canvas" style="display:block"></canvas>
+</div>
+
+
+<div id="mainContent_edit" style="display:none">
+EDIT
+</div>
 
 <script>
 (() => {
@@ -101,8 +116,12 @@
   const SAMPLE_INTERVAL_MS = 100; // 解析間隔（ms）
   const DEDUP_SEC = 0.2;         // 近接重複記録を抑制（秒）
 
+  const modeSerect = document.getElementById('modeSerect');
+  const mainContent_new = document.getElementById('mainContent_new');
+  const mainContent_edit = document.getElementById('mainContent_edit');
   const video = document.getElementById('video');
-  const input = document.getElementById('videoInput');
+  const videoInput = document.getElementById('videoInput');
+  const modeInput = document.getElementById('modeSerect');
   const wrap  = document.getElementById('wrap');
   const monitor = document.getElementById('monitor');
   const canvas = document.getElementById('canvas');
@@ -116,6 +135,8 @@
   const debugEl = document.getElementById("debug");
   const debug2El = document.getElementById("debug2");
 
+  let file = null;
+  let mode = null;
   let objURL = null;
   let analyzing = false;
   let analyzerTimer = null;
@@ -123,15 +144,48 @@
   let colorChanges = [];           // 記録（時刻の配列）
   let videoFileNameBase = 'video';
 
+  // ==== メインコンテンツ表示・非表示 ====
+  function mainContentShow(mode) {
+    if (mode === 'New') {
+      mainContent_new.style.display = 'block';
+      mainContent_edit.style.display = 'none';
+    } 
+    else if (mode === 'Edit') {
+      mainContent_edit.style.display = 'block';
+      mainContent_new.style.display = 'none';
+    }
+  }
+
   // ==== 動画ロード ====
-  input.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
+  videoInput.addEventListener('change', e => {
+    file = e.target.files[0];
+    if (!file) {
+      mainContentShow(null);
+      return;
+    }
+    alert(file + " / " + mode);
     if (objURL) URL.revokeObjectURL(objURL);
     objURL = URL.createObjectURL(file);
     video.src = objURL;
     const n = file.name || 'video.mp4';
     videoFileNameBase = n.replace(/\.[^.]+$/, '');
+    if (!file || !mode) {
+      mainContentShow(null);
+      return;
+    }
+    mainContentShow(mode);
+  });
+
+  // モード選択
+  modeSerect.addEventListener('change', e => {
+    mode = modeSerect.mode.value;
+    
+    alert(file + " / " + mode);
+    if (!file || !mode) {
+      mainContentShow(null);
+      return;
+    }
+    mainContentShow(mode);
   });
 
   // ==== 再生/停止ボタン ====
